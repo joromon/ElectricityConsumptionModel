@@ -1,1 +1,1 @@
-# MLConsumptionAnalysis
+# ElectricityConsumptionModel
