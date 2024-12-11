@@ -54,6 +54,7 @@ cadaster = cadaster[~pd.isna(cadaster.postalcode) &
 cadaster = pl.DataFrame(
     cadaster.groupby("postalcode")[["builtarea","households"]].sum().reset_index())
 
+###############################################
 # Data transformation
 ## Calculate the local time, hour and date of each data point
 consumption = consumption.with_columns(
@@ -108,6 +109,8 @@ for postalcode in consumption["postalcode"].unique():
     plot_daily_load_curves_with_centroids_to_pdf(
         df=consumption.filter(pl.col("postalcode")==postalcode),
         pdf_path=f"plots/daily_load_curves_all_{postalcode}.pdf")
+
+########################################3
 
 ####
 # TASK1: CLUSTERING DAILY LOAD CURVES
