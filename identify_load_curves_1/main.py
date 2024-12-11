@@ -1,3 +1,4 @@
+import pandas as pd
 
 
 def identify_load_curves():

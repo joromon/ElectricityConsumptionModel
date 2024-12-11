@@ -6,6 +6,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib import colormaps
 import numpy as np
 from scipy.cluster.hierarchy import dendrogram
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import mean_squared_error
 
 def plot_dendrogram(model, **kwargs):
     # Create linkage matrix and then plot the dendrogram
@@ -147,3 +149,62 @@ def weather_plotter(weather, html_file):
     with open(html_file, "w") as f:
         for fig in figs:
             f.write(pio.to_html(fig, full_html=False))
+
+# Function to evaluate models
+def evaluate_model(model_name, preprocessor, model, X_train, y_train, X_test, y_test):
+    # Create and evaluate the pipeline with the given model
+    pipeline = Pipeline(steps=[('preprocessor', preprocessor),
+                               ('model', model)])
+
+    # Train the model
+    pipeline.fit(X_train, y_train)
+
+    # Make predictions
+    y_pred = pipeline.predict(X_test)
+
+    # Calculate mean squared error
+    mse = mean_squared_error(y_test, y_pred)
+    rmse = np.sqrt(mse)
+
+    ## normalized
+    target_range = y_test.max() - y_test.min()
+    normalized_rmse = rmse / target_range
+    cvrmse = rmse / y_test.mean()
+
+    print(f"{model_name} - Root Mean Squared Error: {round(rmse, 2)}")
+    print(f"{model_name} - Normalized Root Mean Squared Error: {round(normalized_rmse * 100, 2)} %")
+    print(f"{model_name} - Coefficient of Variation of the Root Mean Squared Error: {round(cvrmse * 100, 2)} %")
+
+    return pipeline
+
+
+def plot_regression_results(pipeline, df, postal_code, model_name, hours=96):
+    # Filter data by postal code
+    postal_filter = df['postalcode'] == postal_code
+
+    df = df[postal_filter]
+
+    X_test_filtered = df.drop(["postalcode","localtime","consumption"], axis=1)
+
+    # Predict consumption
+    y_pred = pipeline.predict(X_test_filtered)
+    df["predicted"] = y_pred.values
+
+    # Cut the result to 96h
+    df = df.iloc[:hours]
+
+    # Plot actual vs predicted
+    plt.figure(figsize=(12, 6))
+    plt.plot(df["localtime"],df["predicted"], label='Actual', marker='o', linestyle='-', markersize=4)
+    plt.plot(df["localtime"],df["consumption"], label='Predicted', marker='x', linestyle='--', markersize=4)
+    plt.title(f"Comparison of Actual and Predicted Consumption for Postal Code {postal_code} ({model_name})")
+    plt.xlabel("Time (hourly interval)")
+    plt.ylabel("Consumption")
+    plt.legend()
+    plt.grid(True)
+
+    # Save the plot as a PNG file
+    file_name = f"plots/results_{model_name}_postalcode_{postal_code}.png"
+    plt.savefig(file_name)
+    plt.close()
+    print(f"Plot saved as {file_name}")
