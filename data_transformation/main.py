@@ -25,6 +25,7 @@ def transform_time(consumption):
 
     return consumption
 
+
 # Function to calculate rolling statistics (mean, std, quantile)
 def calculate_rolling_stats(consumption):
     # Rolling mean over 48 hours
@@ -33,6 +34,11 @@ def calculate_rolling_stats(consumption):
     consumption['rolling_std'] = consumption.groupby('postalcode')['consumption'].rolling(window=48, min_periods=4, center=True).std().reset_index(level=0, drop=True)
     # Rolling 10th quantile over 168 hours
     consumption['rolling_q10'] = consumption.groupby('postalcode')['consumption'].rolling(window=168, min_periods=24, center=True).quantile(0.1).reset_index(level=0, drop=True)
+    #consumption['rolling_q10'] = consumption.groupby('postalcode')['consumption'] \
+    #.rolling(window=168, min_periods=24, center=True) \
+    #.apply(lambda x: x.quantile(0.1, interpolation='nearest'), raw=False) \
+    #.reset_index(level=0, drop=True)
+
     return consumption
 
 # Function to normalize the consumption data (z-score)
@@ -51,6 +57,7 @@ def filter_extreme_values(consumption, max_threshold=4, min_threshold=-2):
         consumption['consumption'], 
         np.nan
     )
+    
     return consumption
 
 # Function to transform and group the cadaster data by postalcode

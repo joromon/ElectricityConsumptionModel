@@ -1,4 +1,5 @@
 import pandas as pd
+import polars as pl
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
@@ -14,77 +15,51 @@ def preprocess_consumption(consumption, n_hours=3):
     Preprocess the consumption data by aggregating hourly data into chunks of n_hours,
     calculating daily consumption percentages, and pivoting to a wide format.
     """
-
-    # Ensure 'localtime' is of datetime type, if it's not already
-    consumption['localtime'] = pd.to_datetime(consumption['localtime'])
-    
-    # Calculate daily consumption by postalcode and date
-    consumption['hour'] = consumption['localtime'].dt.hour
-    consumption['day'] = consumption['localtime'].dt.date
-    
-    # Group by postalcode and date and calculate daily consumption
-    daily_consumption = consumption.groupby(['postalcode', 'day'])['consumption_filtered'].mean() * 24
-    consumption = consumption.merge(daily_consumption, on=['postalcode', 'day'], suffixes=('', '_daily'))
-    
-    # Group by postalcode, adjusted hour (to 'n_hours'), date, and daily_consumption, 
-    # and calculate the intraday consumption
-    consumption['hour_group'] = (consumption['hour'] // n_hours) * n_hours
-    consumption_grouped = consumption.groupby(['postalcode', 'hour_group', 'day', 'consumption_filtered_daily']).agg({'consumption_filtered': 'mean'}).reset_index()
-    
-    # Calculate the consumption percentage
-    consumption_grouped['consumption_percentage'] = (consumption_grouped['consumption_filtered'] * 100) / consumption_grouped['consumption_filtered_daily']
-    
-    # Change format to long (one row per combination of postalcode, hour, and date)
-    consumption_long = consumption_grouped.rename(columns={'hour_group': 'hour'})
-
-    print(consumption_long)
-    sys.exit()
-    
-    # Transform the dataset into a wide format (one column per hour)
-    consumption_wide = consumption_long.pivot_table(index=['postalcode', 'day'], columns='hour', values='consumption_percentage', aggfunc='first')
-    
-    # Reset the index to make postalcode and day regular columns again
-    consumption_wide.reset_index(inplace=True)
-    
-    return consumption_wide
-
-'''
-def preprocess_consumption(consumption, n_hours=3):
-    print(consumption)
-    sys.exit()
-    """
-    Preprocess the consumption data by aggregating hourly data into chunks of n_hours,
-    calculating daily consumption percentages, and pivoting to a wide format.
-    """
     print("### Preprocessing Consumption Data ###")
+    consumption = consumption.copy(deep=True)
 
-    # Calcular la 'daily_consumption' como la media de 'consumption_filtered' * 24
-    consumption["daily_consumption"] = consumption.groupby(
-        ["postalcode", "date"]
-    )["consumption_filtered"].transform("mean") * 24
+    consumption['daily_consumption'] = consumption.groupby(['postalcode', 'date'])['consumption_filtered'].transform(
+        lambda x: 'NaN' if x.isna().any() else x.mean() * 24
+        #lambda x: x.mean() * 24
+    )
+    consumption['hour'] = (np.floor(consumption['localtime'].dt.hour / n_hours) * n_hours).astype(int)
 
-    # Ajustar la hora para agrupar en bloques de n_hours
-    consumption["hour"] = (consumption["localtime"].dt.hour // n_hours) * n_hours
+    # Group again to calculate the mean of 'consumption_filtered' by hour
+    def mean_with_nan(x):
+        if x.isna().any():
+            return 'NaN'
+        else:
+            return x.mean()
 
-    # Agregar por 'hour' y calcular el porcentaje respecto a 'daily_consumption'
-    consumption_long = consumption.groupby(
-        ["postalcode", "hour", "date", "daily_consumption"]
-    )["consumption_filtered"].mean().reset_index()
-    
-    consumption_long["consumption"] = (
-        consumption_long["consumption_filtered"] * 100 / consumption_long["daily_consumption"]
+    consumption_long = consumption.groupby(['postalcode', 'hour', 'date', 'daily_consumption'], as_index=False).agg(
+        consumption_filtered_mean=('consumption_filtered', mean_with_nan)
     )
 
-    # Asegurarse de que la agregación por 'hour' y el cálculo del porcentaje estén bien hechos
+    #  Multiply by n_hours
+    consumption_long['consumption_filtered'] = consumption_long['consumption_filtered_mean'].apply(
+        lambda x: 'NaN' if x == 'NaN' else x * n_hours
+    )
+    
+    # Calculate the consumption percentage relative to daily consumption
+    consumption_long['consumption'] = consumption_long.apply(
+        lambda row: 'NaN' if row['daily_consumption'] == 'NaN' else (row['consumption_filtered'] * 100) / row['daily_consumption'],
+        axis=1
+    )
+    consumption_long.drop(columns=['consumption_filtered_mean'], inplace=True)
+
+    #export to check data
+    #consumption_long.to_csv('consumption_long.csv')
+    consumption_long = consumption_long.map(lambda x: np.nan if x == "NaN" else x)
+    
+    print(len(consumption_long))
+    # Ensure aggregation per hour i'ts fine
     consumption_wide = consumption_long.pivot_table(
         index=["postalcode", "date"], columns="hour", values="consumption", aggfunc="mean"
-    ).fillna(0)
+    )
 
-    # Ajustar el orden de las columnas para asegurarse de que los valores de las horas estén en el orden correcto
     consumption_wide = consumption_wide.sort_index(axis=1, ascending=True)
-
+    
     return consumption_wide
-'''
 
 def scale_data(consumption_wide, scaling_method):
     """
@@ -112,6 +87,7 @@ def scale_data(consumption_wide, scaling_method):
     else:
         raise ValueError("Invalid scaling method. Choose from 'no_scaling', 'min_max_scaling', or 'z_norm_scaling'.")
 
+
 def save_plot_dendrogram(model, filepath, **kwargs):
     """
     Create and save a dendrogram plot for hierarchical clustering.
@@ -119,15 +95,14 @@ def save_plot_dendrogram(model, filepath, **kwargs):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
     plt.figure(figsize=(15, 8))
-    
+  
     counts = np.zeros(model.children_.shape[0])
     n_samples = len(model.labels_)
-
     for i, merge in enumerate(model.children_):
         current_count = 0
         for child_idx in merge:
             if child_idx < n_samples:
-                current_count += 1  # Leaf node
+                current_count += 1  # leaf node
             else:
                 current_count += counts[child_idx - n_samples]
         counts[i] = current_count
@@ -135,9 +110,9 @@ def save_plot_dendrogram(model, filepath, **kwargs):
     linkage_matrix = np.column_stack(
         [model.children_, model.distances_, counts]
     ).astype(float)
-
     # Plot the dendrogram
     dendrogram(linkage_matrix, **kwargs)
+    
 
     plt.title("Hierarchical Clustering Dendrogram")
     plt.xlabel("Number of points in node (or index if no parenthesis).")
@@ -145,57 +120,66 @@ def save_plot_dendrogram(model, filepath, **kwargs):
     plt.savefig(filepath)
     plt.close()
 
+
 def save_daily_load_curves(consumption, cluster_labels, scaling_type, n_clusters, filepath="plots"):
     """
     Save daily load curves grouped by clusters into PDF files.
     """
-    print(f"### Saving Daily Load Curves for {scaling_type} with {n_clusters} Clusters ###")
+    # Make sure the original data has no missing values in the relevant column
+    # consumption = consumption.dropna(subset=["consumption_filtered"])
 
-    os.makedirs(filepath, exist_ok=True)
+    # Add cluster labels to the consumption DataFrame
+    consumption['cluster'] = cluster_labels
 
-    # Add cluster labels to the consumption data
-    consumption_with_clusters = consumption.copy()
-    
-    if len(cluster_labels) != len(consumption_with_clusters.index):
-        consumption_with_clusters = consumption_with_clusters.iloc[:len(cluster_labels)]
+    # Calculate the daily consumption by postalcode and date
+    daily_consumption = consumption.groupby(["postalcode", "date"]).agg(
+        daily_consumption=("consumption_filtered", lambda x: x.mean() * 24)
+    ).reset_index()
 
-    consumption_with_clusters["cluster"] = cluster_labels
+    # Merge daily consumption back into the original data
+    consumption_with_labels = consumption.merge(daily_consumption, on=["postalcode", "date"], how="left")
 
+    # Normalize the consumption based on daily consumption
+    consumption_with_labels['consumption_filtered'] = (
+        consumption_with_labels['consumption_filtered'] * 100 / consumption_with_labels['daily_consumption']
+    )
+
+    # Create the daily load curves with the centroids
+    plt.figure(figsize=(12, 6))
     for cluster in range(n_clusters):
-        cluster_data = consumption_with_clusters[consumption_with_clusters["cluster"] == cluster]
+        cluster_data = consumption_with_labels[consumption_with_labels['cluster'] == cluster]
+        plt.plot(cluster_data['date'], cluster_data['consumption_filtered'], label=f"Cluster {cluster}")
+    
+    plt.title(f"Daily Load Curves - {scaling_type} scaling with {n_clusters} clusters")
+    plt.xlabel("Date")
+    plt.ylabel("Normalized Consumption (%)")
+    plt.legend()
 
-        # Plot daily load curves for the cluster
-        plt.figure(figsize=(12, 6))
-        for _, row in cluster_data.iterrows():
-            plt.plot(row.index[2:], row.values[2:], alpha=0.5)
-        
-        plt.title(f"Cluster {cluster} - {scaling_type}")
-        plt.xlabel("Hour")
-        plt.ylabel("Consumption (%)")
-        plt.grid()
-        plt.savefig(f"{filepath}/daily_load_curves_cluster_{cluster}.pdf")
-        plt.close()
+    # Save the plot as a PDF file
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)  # Ensure the folder exists
+    plt.savefig(filepath, format="pdf")
+    plt.close()
 
-def perform_clustering(consumption_wide_scaled, original_data, n_clusters, scaling_type="no_scale"):
+    print(f"Daily load curves saved to {filepath}")
+
+def perform_clustering(consumption_wide_scaled, consumption, n_clusters, scaling_type="no_scale"):
     """
     Perform hierarchical clustering with the specified number of clusters and plot results.
     """
     print("### Performing Clustering ###")
 
-    print(consumption_wide_scaled)
-    sys.exit()
-
     clustering_X = consumption_wide_scaled.dropna(axis=0)
+    len(clustering_X)
     
     print(f"Clustering data with {n_clusters} clusters")
     model = AgglomerativeClustering(
         n_clusters=n_clusters, compute_distances=True, linkage="ward"
     )
-    cluster_labels = model.fit_predict(clustering_X)
+    cluster_labels = model.fit(clustering_X)
 
     # Save dendrogram
     save_plot_dendrogram(
-        model,
+        cluster_labels,
         filepath=f"plots/hierarchical_dendrogram_{n_clusters}_{scaling_type}.pdf",
         truncate_mode="lastp",
         p=n_clusters
@@ -204,11 +188,11 @@ def perform_clustering(consumption_wide_scaled, original_data, n_clusters, scali
     '''
     # Save daily load curves for clusters
     save_daily_load_curves(
-        original_data, 
+        consumption, 
         cluster_labels, 
         scaling_type=scaling_type, 
         n_clusters=n_clusters,
-        filepath=f"plots"
+        filepath=f"plots/daily_load_curves_cluster_{n_clusters}_{scaling_type}.pdf"
     )
     '''
 
@@ -222,8 +206,6 @@ def identify_load_curves(consumption, scaling_method="no_scaling", n_clusters=3)
     # Preprocess the data
     consumption_wide = preprocess_consumption(consumption, n_hours=n_hours)
 
-    print(consumption_wide)
-    sys.exit()
     # Scale the data
     consumption_wide_scaled = scale_data(consumption_wide, scaling_method)
 
