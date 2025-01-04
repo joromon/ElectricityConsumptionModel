@@ -233,6 +233,16 @@ def perform_clustering(consumption_wide_scaled, consumption, n_clusters, scaling
     index_X = clustering_X.index.to_frame(index=False)
     cluster_model = model.fit(clustering_X)
     cluster_labels = model.fit_predict(clustering_X)
+
+    # Create clustering results DataFrame
+    clustering_results = (
+        pl.concat([
+            pl.DataFrame(index_X),
+            pl.DataFrame({"cluster": cluster_labels})],
+            how="horizontal")
+        .with_columns(
+            pl.col("date").cast(pl.Date))
+    )
     
     # Save dendrogram
     save_plot_dendrogram(
@@ -250,6 +260,8 @@ def perform_clustering(consumption_wide_scaled, consumption, n_clusters, scaling
         scaling_type=scaling_type, 
         filepath=f"plots/daily_load_curves_cluster_{n_clusters}_{scaling_type}.pdf"
     )
+
+    return clustering_results
 
 def perform_shilhoutte(consumption_wide_scaled, n_clusters, scaling_type="no_scale"):
     clustering_X = consumption_wide_scaled.dropna(axis=0)
@@ -281,6 +293,9 @@ def identify_load_curves(consumption, scaling_method="no_scaling", n_clusters=3,
     consumption_wide_scaled = scale_data(consumption_wide, scaling_method)
 
     # Perform clustering
-    perform_clustering(consumption_wide_scaled, consumption, n_clusters, scaling_type=scaling_method)
+    clustering_results = perform_clustering(consumption_wide_scaled, consumption, n_clusters, scaling_type=scaling_method)
+
     if do_silhouette:
         perform_shilhoutte(consumption_wide_scaled, n_clusters, scaling_type=scaling_method)
+    
+    return clustering_results

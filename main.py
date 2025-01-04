@@ -5,6 +5,7 @@ import geopandas as gpd
 
 from data_transformation.main import transform_consumption_data
 from identify_load_curves_1.main import identify_load_curves
+from predict_day_ahead_probability.main import predict_day_ahead_probability
 
 #ENVIROMENT VALUES
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -38,9 +39,17 @@ POSTALCODES = gpd.read_file(POSTAL_CODES_LLEIDA)
 CONSUMPTION, CADASTER_WITH_POSTALCODE = transform_consumption_data(CONSUMPTION, CADASTER, POSTALCODES)
 
 if __name__ == "__main__":
-    identify_load_curves(
+    clustering_results = identify_load_curves(
         CONSUMPTION,
         scaling_method="z_norm_scaling", 
-        n_clusters=4, 
+        n_clusters=3, 
         do_silhouette = False
+    )
+
+    predict_day_ahead_probability(
+        CONSUMPTION,
+        WEATHER,
+        SOCIOECONOMIC,
+        CADASTER_WITH_POSTALCODE,
+        clustering_results
     )
