@@ -5,7 +5,8 @@ import geopandas as gpd
 
 from data_transformation.main import transform_consumption_data
 from identify_load_curves_1.main import identify_load_curves
-from predict_day_ahead_probability.main import predict_day_ahead_probability
+from predict_day_ahead_probability_2.main import predict_day_ahead_probability
+from electricity_consumption_forecast_3.main import electricity_consumption_forecast
 
 #ENVIROMENT VALUES
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -45,11 +46,20 @@ if __name__ == "__main__":
         n_clusters=3, 
         do_silhouette = False
     )
-
+    '''
     predict_day_ahead_probability(
         CONSUMPTION,
         WEATHER,
         SOCIOECONOMIC,
         CADASTER_WITH_POSTALCODE,
         clustering_results
+    )
+    '''
+
+    electricity_consumption_forecast(
+        CONSUMPTION,   
+        WEATHER,       
+        SOCIOECONOMIC, 
+        CADASTER_WITH_POSTALCODE,      
+        POSTALCODES    
     )
