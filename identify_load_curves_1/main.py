@@ -6,6 +6,8 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import silhouette_score
 import matplotlib.pyplot as plt
 from scipy.cluster.hierarchy import dendrogram
+from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib import colormaps
 import os
 import sys
 
@@ -51,7 +53,6 @@ def preprocess_consumption(consumption, n_hours=3):
     #consumption_long.to_csv('consumption_long.csv')
     consumption_long = consumption_long.map(lambda x: np.nan if x == "NaN" else x)
     
-    print(len(consumption_long))
     # Ensure aggregation per hour i'ts fine
     consumption_wide = consumption_long.pivot_table(
         index=["postalcode", "date"], columns="hour", values="consumption", aggfunc="mean"
@@ -121,47 +122,85 @@ def save_plot_dendrogram(model, filepath, **kwargs):
     plt.close()
 
 
-def save_daily_load_curves(consumption, cluster_labels, scaling_type, n_clusters, filepath="plots"):
+def save_daily_load_curves(consumption, cluster_labels, index_X, scaling_type, filepath):
     """
-    Save daily load curves grouped by clusters into PDF files.
+    Save daily load curves with centroids for each cluster to a PDF file.
     """
-    # Make sure the original data has no missing values in the relevant column
-    # consumption = consumption.dropna(subset=["consumption_filtered"])
+    print("### Saving Daily Load Curves ###")
 
-    # Add cluster labels to the consumption DataFrame
-    consumption['cluster'] = cluster_labels
+    # Ensure the output directory exists
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    consumption = pl.from_pandas(consumption)
 
-    # Calculate the daily consumption by postalcode and date
-    daily_consumption = consumption.groupby(["postalcode", "date"]).agg(
-        daily_consumption=("consumption_filtered", lambda x: x.mean() * 24)
-    ).reset_index()
+    df=(consumption.select(pl.all().exclude("cluster")).
+        join(
+            consumption.group_by(["postalcode", "date"]).agg(
+                (pl.col("consumption_filtered").mean() * 24).alias("daily_consumption")
+            ),
+            on=["postalcode", "date"]).
+        with_columns(
+            (pl.col("consumption_filtered") * 100 / pl.col("daily_consumption")).alias("consumption_filtered")
+        ).
+        join(
+            pl.DataFrame(
+                pd.concat([
+                    index_X.reset_index(drop=True),  # Ensure no index issues
+                    pd.DataFrame(cluster_labels, columns=["cluster"])],
+                    axis=1
+                )).
+            with_columns(pl.col("date").cast(pl.Date)),
+        on=["postalcode","date"]))
 
-    # Merge daily consumption back into the original data
-    consumption_with_labels = consumption.merge(daily_consumption, on=["postalcode", "date"], how="left")
+    if "cluster" not in df.columns:
+        df = df.with_columns(pl.lit(1).alias("cluster"))
 
-    # Normalize the consumption based on daily consumption
-    consumption_with_labels['consumption_filtered'] = (
-        consumption_with_labels['consumption_filtered'] * 100 / consumption_with_labels['daily_consumption']
+    # Ensure the DataFrame is sorted by date and hour
+    df = df.sort(["date", "postalcode", "hour"])
+
+    # Group by 'date' and 'cluster', and collect consumption data for each day
+    daily_curves = df.group_by(["date", "postalcode", "cluster"]).agg(pl.col("consumption_filtered"))
+
+    # Create a centroid DataFrame by averaging consumption for each hour and cluster
+    centroids = (
+        df.group_by(["hour", "cluster"]).
+        agg(pl.col("consumption_filtered").drop_nans().mean().alias("consumption_filtered")).
+        sort(["hour","cluster"]).
+        pivot(index=["cluster"], on="hour")
     )
 
-    # Create the daily load curves with the centroids
-    plt.figure(figsize=(12, 6))
-    for cluster in range(n_clusters):
-        cluster_data = consumption_with_labels[consumption_with_labels['cluster'] == cluster]
-        plt.plot(cluster_data['date'], cluster_data['consumption_filtered'], label=f"Cluster {cluster}")
-    
-    plt.title(f"Daily Load Curves - {scaling_type} scaling with {n_clusters} clusters")
-    plt.xlabel("Date")
-    plt.ylabel("Normalized Consumption (%)")
-    plt.legend()
+    # Convert to pandas for easy plotting with matplotlib
+    daily_curves_pandas = daily_curves.to_pandas()
+    centroids_pandas = centroids.to_pandas()
 
-    # Save the plot as a PDF file
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)  # Ensure the folder exists
-    plt.savefig(filepath, format="pdf")
-    plt.close()
+    with PdfPages(filepath) as pdf:
+        plt.figure(figsize=(10, 6))
+        unique_clusters = df["cluster"].unique().to_list()
+        colors = colormaps["tab10"]  # Use the updated way to access colormaps
+        for _, row in daily_curves_pandas.iterrows():
+            date = row["date"]
+            cluster = row["cluster"]
+            consumption = row["consumption_filtered"]
+            # Plot individual daily load curves with low opacity
+            plt.plot(range(len(consumption)), consumption, alpha=0.1, lw=0.005, color=colors(cluster / len(unique_clusters)),
+                     label=None)
+        # Plot centroids with bold lines
+        for cluster in unique_clusters:
+            centroid = centroids_pandas[centroids_pandas["cluster"] == cluster].drop("cluster", axis=1).iloc[0].to_numpy()
+            plt.plot(range(len(centroid)), centroid, linewidth=2.5, label=f"Cluster {cluster}",
+                     color=colors(cluster / len(unique_clusters)))
+        # Add labels and legend
+        plt.xlabel("Hour of Day")
+        plt.ylabel("Consumption")
+        plt.title(f"Daily Load Curves {scaling_type} Clustering")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        # Save the current figure to the PDF
+        pdf.savefig()
+        plt.close()
 
-    print(f"Daily load curves saved to {filepath}")
-
+        print(f"### Daily Load Curves saved to {filepath} ###")
+        
 def perform_clustering(consumption_wide_scaled, consumption, n_clusters, scaling_type="no_scale"):
     """
     Perform hierarchical clustering with the specified number of clusters and plot results.
@@ -175,26 +214,28 @@ def perform_clustering(consumption_wide_scaled, consumption, n_clusters, scaling
     model = AgglomerativeClustering(
         n_clusters=n_clusters, compute_distances=True, linkage="ward"
     )
-    cluster_labels = model.fit(clustering_X)
+    
+    index_X = clustering_X.index.to_frame(index=False)
+    cluster_model = model.fit(clustering_X)
+    cluster_labels = model.fit_predict(clustering_X)
+    
 
     # Save dendrogram
     save_plot_dendrogram(
-        cluster_labels,
+        cluster_model,
         filepath=f"plots/hierarchical_dendrogram_{n_clusters}_{scaling_type}.pdf",
         truncate_mode="lastp",
         p=n_clusters
     )
 
-    '''
     # Save daily load curves for clusters
     save_daily_load_curves(
         consumption, 
-        cluster_labels, 
+        cluster_labels,
+        index_X,
         scaling_type=scaling_type, 
-        n_clusters=n_clusters,
         filepath=f"plots/daily_load_curves_cluster_{n_clusters}_{scaling_type}.pdf"
     )
-    '''
 
 def identify_load_curves(consumption, scaling_method="no_scaling", n_clusters=3):
     """
