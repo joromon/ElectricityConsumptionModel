@@ -38,4 +38,9 @@ POSTALCODES = gpd.read_file(POSTAL_CODES_LLEIDA)
 CONSUMPTION, CADASTER_WITH_POSTALCODE = transform_consumption_data(CONSUMPTION, CADASTER, POSTALCODES)
 
 if __name__ == "__main__":
-    identify_load_curves(CONSUMPTION)
+    identify_load_curves(
+        CONSUMPTION,
+        scaling_method="z_norm_scaling", 
+        n_clusters=4, 
+        do_silhouette = False
+    )

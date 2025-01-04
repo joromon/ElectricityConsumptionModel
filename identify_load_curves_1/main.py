@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import polars as pl
 import numpy as np
@@ -8,8 +9,8 @@ import matplotlib.pyplot as plt
 from scipy.cluster.hierarchy import dendrogram
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib import colormaps
-import os
-import sys
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
 
 def preprocess_consumption(consumption, n_hours=3):
@@ -200,7 +201,21 @@ def save_daily_load_curves(consumption, cluster_labels, index_X, scaling_type, f
         plt.close()
 
         print(f"### Daily Load Curves saved to {filepath} ###")
-        
+
+def save_silhouette_scores(silhouette_scores, scaling_type, n_clusters_range, filepath):
+    """
+    Save silhouette scores to a PDF file.
+    """
+    plt.figure(figsize=(10, 5))
+    plt.plot(n_clusters_range, silhouette_scores, marker='o')
+    plt.xlabel('Number of Clusters')
+    plt.ylabel('Silhouette Score')
+    plt.title(f"Optimisation of the number of clusters - {scaling_type}")
+    plt.savefig(filepath, format="pdf")
+    plt.close()
+    print(f"Silhouette scores saved to {filepath}")
+
+
 def perform_clustering(consumption_wide_scaled, consumption, n_clusters, scaling_type="no_scale"):
     """
     Perform hierarchical clustering with the specified number of clusters and plot results.
@@ -219,7 +234,6 @@ def perform_clustering(consumption_wide_scaled, consumption, n_clusters, scaling
     cluster_model = model.fit(clustering_X)
     cluster_labels = model.fit_predict(clustering_X)
     
-
     # Save dendrogram
     save_plot_dendrogram(
         cluster_model,
@@ -237,7 +251,23 @@ def perform_clustering(consumption_wide_scaled, consumption, n_clusters, scaling
         filepath=f"plots/daily_load_curves_cluster_{n_clusters}_{scaling_type}.pdf"
     )
 
-def identify_load_curves(consumption, scaling_method="no_scaling", n_clusters=3):
+def perform_shilhoutte(consumption_wide_scaled, n_clusters, scaling_type="no_scale"):
+    clustering_X = consumption_wide_scaled.dropna(axis=0)
+    # Silhouette scores
+    silhouette_scores = []
+    for n_clusters in range(2, 10):
+        print(f"Clustering for shilhoutte with {n_clusters} clusters")
+        alg = AgglomerativeClustering(n_clusters=n_clusters, compute_distances=True, linkage="ward")
+        cl_r = alg.fit(clustering_X)
+        cluster_labels = cl_r.labels_
+        silhouette_avg = silhouette_score(
+            clustering_X,
+            cluster_labels)
+        silhouette_scores.append(silhouette_avg)
+
+    save_silhouette_scores(silhouette_scores, scaling_type, range(2, 10), f"plots/silhouette_scores_{scaling_type}.pdf")
+    
+def identify_load_curves(consumption, scaling_method="no_scaling", n_clusters=3, do_silhouette = True):
     """
     Main function to identify daily load curves using clustering.
     """
@@ -252,6 +282,5 @@ def identify_load_curves(consumption, scaling_method="no_scaling", n_clusters=3)
 
     # Perform clustering
     perform_clustering(consumption_wide_scaled, consumption, n_clusters, scaling_type=scaling_method)
-
-def main(consumption, scaling_method="no_scaling", n_clusters=3):
-    identify_load_curves(consumption, scaling_method=scaling_method, n_clusters=n_clusters)
+    if do_silhouette:
+        perform_shilhoutte(consumption_wide_scaled, n_clusters, scaling_type=scaling_method)
