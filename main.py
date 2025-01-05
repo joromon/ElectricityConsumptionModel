@@ -46,7 +46,7 @@ if __name__ == "__main__":
         n_clusters=3, 
         do_silhouette = False
     )
-    '''
+    
     predict_day_ahead_probability(
         CONSUMPTION,
         WEATHER,
@@ -54,12 +54,11 @@ if __name__ == "__main__":
         CADASTER_WITH_POSTALCODE,
         clustering_results
     )
-    '''
 
     electricity_consumption_forecast(
         CONSUMPTION,   
         WEATHER,       
         SOCIOECONOMIC, 
         CADASTER_WITH_POSTALCODE,      
-        POSTALCODES    
+        ["25001", "25193"]  
     )

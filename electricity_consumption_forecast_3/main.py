@@ -12,6 +12,9 @@ from sklearn.metrics import mean_squared_error
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.dates import DateFormatter
 import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+
 
 def evaluate_regression_model(model_name, preprocessor, model, hyperparams_ranges, cross_val,
                               X_train, y_train, X_test, y_test):
@@ -184,8 +187,8 @@ def create_and_train_model(preprocessor, X_train, y_train, X_test, y_test, hyper
         cross_val=TimeSeriesSplit(n_splits=5, test_size=96),
         X_train=X_train,
         y_train=y_train,
-        X_test=X_test,  # Add this line
-        y_test=y_test   # Add this line
+        X_test=X_test,
+        y_test=y_test
     )
     return pipelines
 
